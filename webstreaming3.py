@@ -19,7 +19,7 @@ import numpy as np
 import RPi.GPIO as GPIO
 
 control_pins = [7,11,13,15]
-
+print('changed')
 for pin in control_pins:
   GPIO.setup(pin, GPIO.OUT)
   GPIO.output(pin, 0)
