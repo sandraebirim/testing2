@@ -16,12 +16,13 @@ import imutils
 import time
 import cv2
 import numpy as np
+
 #import RPi.GPIO as GPIO
 import serial 
 
 
 ser = serial.Serial('/dev/ttyUSB0', 9600)
-#ser.write(b"testing")
+
 
 kit = ServoKit(channels=16)
 
