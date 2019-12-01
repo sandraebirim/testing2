@@ -16,8 +16,32 @@ import imutils
 import time
 import cv2
 import numpy as np
+#import RPi.GPIO as GPIO
+import serial 
+
+
+ser = serial.Serial('/dev/ttyUSB0', 9600)
+#ser.write(b"testing")
 
 kit = ServoKit(channels=16)
+
+#mode = GPIO.getmode()
+#print(mode)
+#GPIO.setmode(GPIO.BCM)
+#print(mode)
+#control_pins = [7,11,13,15]
+#control_pins = [4,17,27,22]
+
+#for pin in control_pins:
+#	GPIO.setup(pin, GPIO.OUT)
+ # 	GPIO.output(pin, 0)
+#	halfstep_seq = [[1,0,0,0],[1,1,0,0],[0,1,0,0],[0,1,1,0],[0,0,1,0],[0,0,1,1],[0,0,0,1],[1,0,0,1]]
+#for i in range(512):
+#	for halfstep in range(8):
+#		for pin in range(4):
+#			GPIO.output(control_pins[pin], halfstep_seq[halfstep][pin])
+#		time.sleep(0.001)
+#GPIO.cleanup()
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -33,6 +57,7 @@ ap.add_argument("-o", "--port", type=int, required=True,
 		help="ephemeral port number of the server (1024 to 65535)")
 ap.add_argument("-f", "--frame-count", type=int, default=32,
 		help="# of frames used to construct the background model")
+ap.add_argument("-a", "--min-area", type=int, default=500, help="minimum area size")
 args = vars(ap.parse_args())
 
 # initialize the output frame and a lock used to ensure thread-safe
@@ -52,7 +77,7 @@ ct = CentroidTracker()
 # load our serialized model from disk
 print("[INFO] loading model...")
 net = cv2.dnn.readNetFromCaffe(args["prototxt"], args["model"])
-
+firstFrame = None
 
 
 # initialize the video stream and allow the camera sensor to
@@ -69,23 +94,64 @@ def index():
 	# return the rendered template
 	return render_template("index.html")
 
-def detect_motion(frameCount,H,W):
+def detect_motion(frameCount,H,W,firstFrame):
 	# grab global references to the video stream, output frame, and
 	# lock variables
 	global vs, outputFrame, lock
-
+	text ='Unoccupied'
 	# initialize the motion detector and the total number of frames
 	# read thus far
 #	md = SingleMotionDetector(accumWeight=0.1)
 #	total = 0
-
+	keepingTrack = []
+	counter=0
+	down = False
 	# loop over frames from the video stream
 	while True:
 		# read the next frame from the video stream, resize it,
 		# convert the frame to grayscale, and blur it
 		frame = vs.read()
-		frame = imutils.resize(frame, width=400)
+		frame = imutils.resize(frame, width=500)
+		frame1 = frame
+		text = 'Unoccupied'
+		gray = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+		gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
+		if firstFrame is None:
+			firstFrame = gray
+			continue 
+		frameDelta = cv2.absdiff(firstFrame, gray)
+		thresh = cv2.threshold(frameDelta, 25, 255, cv2.THRESH_BINARY)[1]
+		thresh = cv2.dilate(thresh, None, iterations=2)
+		cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+		cv2.CHAIN_APPROX_SIMPLE)
+		cnts = imutils.grab_contours(cnts)
+		for c in cnts:
+		# if the contour is too small, ignore it
+			if cv2.contourArea(c) < args["min_area"]:
+				continue
+			text ='Occupied'
+#		counter = 0
+		if counter == 0:
+			if text == 'Occupied':
+		#	print(text)
+				ser.write(b'w') #worked 
+
+				counter +=1
+				down = True
+		key = cv2.waitKey(1) & 0xFF
+
+		print(text)
+	#	print(keepingTrack)
+	#	print(text)
+	#	ser.write(text)
+#		while 1:
+#			wrote = ser.readline()
+#			print(wrote)		
+				
+#		print(text)
+		if key == ord('q'):
+			break
 # if the frame dimensions are None, grab them
 		if W is None or H is None:
 			(H, W) = frame.shape[:2]
@@ -135,11 +201,46 @@ def detect_motion(frameCount,H,W):
 	# show the output frame
 		cv2.imshow("Frame", frame)
 		key = cv2.waitKey(1) & 0xFF
-		angle = my_map(value, 0, 500, 0, 180)
-		print(angle)
+#		counter  = 0
+
+	#	keepingTrack = []
+		angle = my_map(value, 0, 600, 180, 0)
+		if text == 'Unoccupied':
+			keepingTrack.append(text)
+			print (keepingTrack)
+		else: 
+			keepingTrack = []
+		if len(keepingTrack) >=  5: 
+			if len(set(keepingTrack))==1:
+				print("Gone for 5 frames")
+				if down == True:
+					ser.write(b'd') #done
+					down = False
+					counter = 0
+			keepingTrack =[]
+		print("value: " + str( value))
+	#	print("angle: " + str(angle))
+#		for i in range(len(kit.continuous_servo)):
+		
+#			if counter == 0:
+#				kit.continuous_servo[i].throttle = 0
+#				counter +=1
+#				prevAngle = angle
+#			else:
+#				if angle >  prevAngle:
+#					kit.continuous_servo[i].throttle = -1
+#				elif angle < prevAngle:
+#					kit.continous_servo[i].throttle = 1
+#				else:
+#					kit.continuous_servo[i].throttle = 0
+#				prevAngle = angle
+#			print("angle "+ str(angle))
+
+#			print ("prevangle " +str(prevAngle))
+#			time.sleep(2)
 		for i in range(len(kit.servo)):
 			kit.servo[i].angle = angle
-		time.sleep(5)
+#		time.sleep(5)
 #		gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 #		gray = cv2.GaussianBlur(gray, (7, 7), 0)
 
@@ -219,7 +320,7 @@ if __name__ == '__main__':
 	
 	# start a thread that will perform motion detection
 	t = threading.Thread(target=detect_motion, args=(
-		args["frame_count"],H,W))
+		args["frame_count"],H,W,firstFrame))
 	t.daemon = True
 	t.start()
 
